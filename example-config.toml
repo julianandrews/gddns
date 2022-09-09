@@ -1,0 +1,5 @@
+cache-dir = "/var/cache/gddns"
+
+[hosts]
+"subdomain-one.example.com" = { username = "username", password = "password" }
+"subdomain-two.example.com" = { username = "username", password = "password" }
