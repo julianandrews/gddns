@@ -15,6 +15,13 @@ update URL:
 - Google Domains: https://domains.google.com/nic/update
 - No-IP: https://dynupdate.no-ip.com/nic/update
 
+gddns is designed for periodic execution. It maintains a cache of recent
+responses and will only hit the DDNS server if your public IP address has
+changed.
+
+I would recommend a systemd timer for logging and visibility, but a simple
+crontab entry should also get the job done.
+
 See `gddns --help` for detailed options.
 
 ### Config file (recommended)
