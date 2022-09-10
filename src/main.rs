@@ -38,8 +38,15 @@ fn update_from_config(config_file: PathBuf, cache_dir: Option<PathBuf>) -> Resul
         .or(config.cache_dir)
         .unwrap_or(PathBuf::from(DEFAULT_CACHE_DIR));
     let ip = get_public_ip().context("Failed to get public IP")?;
+    let mut update_failed = false;
     for (hostname, client_info) in &config.hosts {
-        update_host(hostname, client_info, ip, Some(&cache_dir))?;
+        if let Err(error) = update_host(hostname, client_info, ip, Some(&cache_dir)) {
+            update_failed = true;
+            eprintln!("Failed to update {}:\n\t{}", hostname, error);
+        }
+    }
+    if update_failed {
+        std::process::exit(1);
     }
     Ok(())
 }
