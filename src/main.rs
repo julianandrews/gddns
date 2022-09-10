@@ -1,6 +1,6 @@
 mod config;
 mod ddns;
-mod ip_cache;
+mod response_cache;
 
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 
 use config::Command;
-use ip_cache::IpCache;
+use response_cache::ResponseCache;
 
 static USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"),);
 static DEFAULT_CACHE_DIR: &str = concat!("/var/cache/", env!("CARGO_PKG_NAME"));
@@ -23,7 +23,7 @@ fn main() -> Result<()> {
             let ip = get_public_ip().context("Failed to get public IP")?;
             update_host(
                 &comm_args.hostname,
-                &comm_args.client_info,
+                &comm_args.client_config,
                 ip,
                 args.cache_dir,
             )
@@ -39,10 +39,10 @@ fn update_from_config(config_file: PathBuf, cache_dir: Option<PathBuf>) -> Resul
         .unwrap_or(PathBuf::from(DEFAULT_CACHE_DIR));
     let ip = get_public_ip().context("Failed to get public IP")?;
     let mut update_failed = false;
-    for (hostname, client_info) in &config.hosts {
-        if let Err(error) = update_host(hostname, client_info, ip, Some(&cache_dir)) {
+    for (hostname, client_config) in &config.hosts {
+        if let Err(error) = update_host(hostname, client_config, ip, Some(&cache_dir)) {
             update_failed = true;
-            eprintln!("Failed to update {}:\n\t{}", hostname, error);
+            eprintln!("Failed to update {}:\n  {}", hostname, error);
         }
     }
     if update_failed {
@@ -53,17 +53,49 @@ fn update_from_config(config_file: PathBuf, cache_dir: Option<PathBuf>) -> Resul
 
 fn update_host<P: Into<PathBuf>>(
     hostname: &str,
-    client_info: &config::ClientInfo,
+    client_config: &config::ClientConfig,
     ip: IpAddr,
     cache_dir: Option<P>,
 ) -> Result<()> {
     let cache = match cache_dir {
-        Some(dir) => IpCache::new(dir),
-        None => IpCache::new(DEFAULT_CACHE_DIR),
+        Some(dir) => ResponseCache::new(dir),
+        None => ResponseCache::new(DEFAULT_CACHE_DIR),
     };
-    let old_ip = cache
+    let cache_entry = cache
         .get(hostname)
         .context(format!("Failed to load cache for {}", hostname))?;
+    let old_ip = match cache_entry {
+        Some((ddns::Response::Good(ip), _)) => Some(ip),
+        Some((ddns::Response::NoChg(ip), _)) => Some(ip),
+        Some((ddns::Response::UserError(e), _)) => {
+            return Err(anyhow::anyhow!(
+                "User Error '{}' for {} on previous run. Fix the error and \
+                clear the cache before running again.",
+                e,
+                hostname
+            ))
+        }
+        Some((ddns::Response::ServerError(e), mtime)) => {
+            let age = std::time::SystemTime::now().duration_since(mtime)?;
+            let backoff_time = std::time::Duration::from_secs(client_config.server_backoff * 60);
+            if age < backoff_time {
+                let age_str = if age.as_secs() >= 120 {
+                    format!("{} minutes", age.as_secs() / 60)
+                } else {
+                    format!("{} seconds", age.as_secs())
+                };
+                return Err(anyhow::anyhow!(
+                    "Server Error '{}' {} ago, waiting {} minutes before retry. Clear the cache to reset.",
+                    e,
+                    age_str,
+                    backoff_time.as_secs() / 60,
+                ));
+            } else {
+                None
+            }
+        }
+        None => None,
+    };
     if old_ip == Some(ip) {
         println!("IP for {} already up to date ({})", hostname, ip);
         return Ok(());
@@ -71,30 +103,29 @@ fn update_host<P: Into<PathBuf>>(
 
     println!("Updating IP for {} to {}", hostname, ip);
     let client = ddns::Client::new(
-        &client_info.username,
-        &client_info.password,
-        &client_info.dyndns_url,
+        &client_config.username,
+        &client_config.password,
+        &client_config.dyndns_url,
     );
-    match client
+    let response = client
         .update(hostname, ip)
-        .with_context(|| format!("Failed to update DNS for {}", hostname))?
-    {
+        .with_context(|| format!("Failed to update DNS for {}", hostname))?;
+    cache
+        .put(hostname, &response)
+        .with_context(|| format!("Failed to update cache for {}", hostname))?;
+    match response {
         ddns::Response::Good(_) => println!("IP for {} updated", hostname),
         ddns::Response::NoChg(_) => println!("Warning: IP for {} unchanged", hostname),
         error_response => {
-            // TODO: Write error to cache
             return Err(anyhow::anyhow!("Failed up update DNS: {}", error_response));
         }
     }
-    cache
-        .put(hostname, ip)
-        .with_context(|| format!("Failed to update cache for {}", hostname))?;
     Ok(())
 }
 
 fn clear_cache(hostname: &str, cache_dir: Option<PathBuf>) -> Result<()> {
     let cache_dir = cache_dir.unwrap_or(PathBuf::from(DEFAULT_CACHE_DIR));
-    let cache = IpCache::new(cache_dir);
+    let cache = ResponseCache::new(cache_dir);
     cache
         .clear(hostname)
         .with_context(|| format!("Failed to clear cache for {}", hostname))?;

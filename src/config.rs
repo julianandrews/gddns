@@ -41,7 +41,7 @@ pub struct HostArgs {
     pub hostname: String,
 
     #[clap(flatten)]
-    pub client_info: ClientInfo,
+    pub client_config: ClientConfig,
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -52,7 +52,7 @@ pub struct ClearCacheArgs {
 }
 
 #[derive(Deserialize, Parser, Debug, Clone)]
-pub struct ClientInfo {
+pub struct ClientConfig {
     /// Username for Dynamic DNS service
     #[clap(short, long)]
     pub username: String,
@@ -64,10 +64,19 @@ pub struct ClientInfo {
     /// URL for the dynamic DNS update API
     #[clap(short, long)]
     pub dyndns_url: String,
+
+    /// Backoff time in minutes before retrying after a server error
+    #[clap(long, default_value = "5")]
+    #[serde(default = "default_server_backoff")]
+    pub server_backoff: u64,
+}
+
+fn default_server_backoff() -> u64 {
+    5
 }
 
 #[derive(Deserialize)]
 pub struct Config {
     pub cache_dir: Option<std::path::PathBuf>,
-    pub hosts: HashMap<String, ClientInfo>,
+    pub hosts: HashMap<String, ClientConfig>,
 }

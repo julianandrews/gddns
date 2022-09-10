@@ -28,49 +28,42 @@ impl Client {
             .basic_auth(&self.username, Some(&self.password))
             .query(&[("hostname", hostname), ("myip", &ip.to_string())])
             .send()?;
-        let ddns_response: Response = response.error_for_status()?.text()?.parse()?;
+        let ddns_response: Response = response.error_for_status()?.text()?.trim().parse()?;
         Ok(ddns_response)
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum Response {
     Good(IpAddr),
     NoChg(IpAddr),
-    NoHost,
-    BadAuth,
-    NotFqdn,
-    BadAgent,
-    Abuse,
-    Error,
-    ConflictA,
-    ConflictAAAA,
+    UserError(String),
+    ServerError(String),
 }
 
 impl std::str::FromStr for Response {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut words = s.trim().split(' ');
-        let kind = words.next().unwrap_or("");
-        let ip = words.next().unwrap_or("");
-        match kind {
-            "good" => Ok(Self::Good(
-                ip.parse()
-                    .map_err(|_| Error::InvalidResponse(s.to_string()))?,
-            )),
-            "nochg" => Ok(Self::NoChg(
-                ip.parse()
-                    .map_err(|_| Error::InvalidResponse(s.to_string()))?,
-            )),
-            "nohost" => Ok(Self::NoHost),
-            "badauth" => Ok(Self::BadAuth),
-            "notfqdn" => Ok(Self::NotFqdn),
-            "badagent" => Ok(Self::BadAgent),
-            "abuse" => Ok(Self::Abuse),
-            "911" => Ok(Self::Error),
-            "conflict A" => Ok(Self::ConflictA),
-            "conflict AAAA" => Ok(Self::ConflictAAAA),
+        let code = s.split(' ').next().unwrap_or("");
+        let last_word = s.rsplit(' ').next().unwrap_or("");
+        match code {
+            "good" => {
+                let ip = last_word
+                    .parse()
+                    .map_err(|_| Error::InvalidResponse(s.to_string()))?;
+                Ok(Self::Good(ip))
+            }
+            "nochg" => {
+                let ip = last_word
+                    .parse()
+                    .map_err(|_| Error::InvalidResponse(s.to_string()))?;
+                Ok(Self::NoChg(ip))
+            }
+            "nohost" | "badauth" | "notfqdn" | "badagent" | "!donator" | "conflict" | "abuse" => {
+                Ok(Self::UserError(s.to_string()))
+            }
+            "dnserr" | "911" => Ok(Self::ServerError(s.to_string())),
             _ => Err(Error::InvalidResponse(s.to_string())),
         }
     }
@@ -79,16 +72,10 @@ impl std::str::FromStr for Response {
 impl std::fmt::Display for Response {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Good(ip) => write!(f, "IP updated ({})", ip),
-            Self::NoChg(ip) => write!(f, "IP unchanged ({})", ip),
-            Self::NoHost => write!(f, "Hostname not registered with account"),
-            Self::BadAuth => write!(f, "Authentication failed"),
-            Self::NotFqdn => write!(f, "Invalid hostname"),
-            Self::BadAgent => write!(f, "User agent not set"),
-            Self::Abuse => write!(f, "Request blocked by abuse policy"),
-            Self::Error => write!(f, "Server error, wait 5 minutes and retry"),
-            Self::ConflictA => write!(f, "Conflict with custom A resource record"),
-            Self::ConflictAAAA => write!(f, "Conflict with custom AAAA resource record"),
+            Self::Good(ip) => write!(f, "good {}", ip),
+            Self::NoChg(ip) => write!(f, "nochg {}", ip),
+            Self::UserError(s) => write!(f, "{}", s),
+            Self::ServerError(s) => write!(f, "{}", s),
         }
     }
 }

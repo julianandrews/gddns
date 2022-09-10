@@ -6,6 +6,7 @@ cache-dir = "/var/cache/gddns"
   username = "NoIPUsername"
   password = "NoIPP@ssword2048"
   dyndns_url = "https://dynupdate.no-ip.com/nic/update"
+  server_backoff = 30
 
   [hosts."google-subdomain.example.com"]
   username = "HExV0aKG0TvckGKh"
