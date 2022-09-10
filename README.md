@@ -1,23 +1,40 @@
 # gddns
 
-Dynamic DNS client for Google Dynamic DNS.
+Dynamic DNS client.
+
+## Supported services
+
+gddns has been tested on Google domains and No-IP, but should work with any
+standard dynamic DNS service.
 
 ## Usage
+
+You will need an account with a dynamic DNS provider, and the corresponding
+update URL:
+
+- Google Domains: https://domains.google.com/nic/update
+- No-IP: https://dynupdate.no-ip.com/nic/update
 
 See `gddns --help` for detailed options.
 
 ### Config file (recommended)
 
-Create a config file at `/etc/gddns/config.toml` with your hostname and auth info:
+Create a config file:
 
 ```
+# /etc/gddns/config.toml
 [hosts]
-"<your_hostname>" = { username = "<your_username>", password = "<your_password>" }
+
+  [hosts."<your_hostname>"]
+  username = "<your_username>"
+  password = "<your_password>"
+  dyndns_url = "https://domains.google.com/nic/update"
 ```
 
 See `example-config.toml` for a concrete example.
 
-Create a directory at `/var/cache/gddns` and ensure you have write access to it.
+You will need write access to a cache directory. By default, gddns will try to
+write to `/var/cache/gddns`.
 
 Invoke with:
 
@@ -27,13 +44,14 @@ gddns
 
 ### Direct invocation
 
-You can also invoke `gddns` directly without any setup:
+You can also invoke gddns directly:
 
 ```
-gddns update-host <your_hostname> --username <your_username> \
-    --password <your_password> --cache-dir /tmp/gddns
+gddns update-host <your_hostname> --username <your_username> --password <your_password> \
+    --dyndns_url "https://domains.google.com/nic/update" --cache-dir /tmp/gddns
 ```
 
-Note that repeated requests to update your IP when it hasn't changed can result
-in blacklisting so you should be careful not to invoke `gddns` without a
-persistent cache directory to prevent unecessary requests.
+## Contributing
+
+Pull requests are welcome. For non-trivial changes, please open an issue to
+discuss the change before starting.

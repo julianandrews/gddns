@@ -21,7 +21,12 @@ fn main() -> Result<()> {
         None => update_from_config(args.config_file, args.cache_dir),
         Some(Command::UpdateHost(comm_args)) => {
             let ip = get_public_ip().context("Failed to get public IP")?;
-            update_host(&comm_args.hostname, &comm_args.auth, ip, args.cache_dir)
+            update_host(
+                &comm_args.hostname,
+                &comm_args.client_info,
+                ip,
+                args.cache_dir,
+            )
         }
         Some(Command::ClearCache(comm_args)) => clear_cache(&comm_args.hostname, args.cache_dir),
     }
@@ -33,15 +38,15 @@ fn update_from_config(config_file: PathBuf, cache_dir: Option<PathBuf>) -> Resul
         .or(config.cache_dir)
         .unwrap_or(PathBuf::from(DEFAULT_CACHE_DIR));
     let ip = get_public_ip().context("Failed to get public IP")?;
-    for (hostname, auth) in &config.hosts {
-        update_host(hostname, auth, ip, Some(&cache_dir))?;
+    for (hostname, client_info) in &config.hosts {
+        update_host(hostname, client_info, ip, Some(&cache_dir))?;
     }
     Ok(())
 }
 
 fn update_host<P: Into<PathBuf>>(
     hostname: &str,
-    auth: &config::Auth,
+    client_info: &config::ClientInfo,
     ip: IpAddr,
     cache_dir: Option<P>,
 ) -> Result<()> {
@@ -56,14 +61,23 @@ fn update_host<P: Into<PathBuf>>(
         println!("IP for {} already up to date ({})", hostname, ip);
         return Ok(());
     }
+
     println!("Updating IP for {} to {}", hostname, ip);
-    let client = ddns::Client::new(&auth.username, &auth.password);
-    match !client
+    let client = ddns::Client::new(
+        &client_info.username,
+        &client_info.password,
+        &client_info.dyndns_url,
+    );
+    match client
         .update(hostname, ip)
         .with_context(|| format!("Failed to update DNS for {}", hostname))?
     {
-        true => println!("IP for {} updated", hostname),
-        false => println!("Warning: IP for {} unchanged", hostname),
+        ddns::Response::Good(_) => println!("IP for {} updated", hostname),
+        ddns::Response::NoChg(_) => println!("Warning: IP for {} unchanged", hostname),
+        error_response => {
+            // TODO: Write error to cache
+            return Err(anyhow::anyhow!("Failed up update DNS: {}", error_response));
+        }
     }
     cache
         .put(hostname, ip)
@@ -80,6 +94,8 @@ fn clear_cache(hostname: &str, cache_dir: Option<PathBuf>) -> Result<()> {
     Ok(())
 }
 
+// TODO: Come up with a more robust/polite approach than hitting httpbin.org
+// STUN?
 fn get_public_ip() -> Result<IpAddr> {
     let client = reqwest::blocking::Client::builder()
         .user_agent(USER_AGENT)

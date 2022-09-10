@@ -27,10 +27,10 @@ pub struct Args {
 #[derive(clap::Subcommand, Debug, Clone)]
 #[clap(setting = AppSettings::ColoredHelp)]
 pub enum Command {
-    /// Update a specific host providing arguments from the command line.
+    /// Update a specific host providing arguments from the command line
     UpdateHost(HostArgs),
 
-    /// Clear the IP cache for a host.
+    /// Clear the IP cache for a host
     ClearCache(ClearCacheArgs),
 }
 
@@ -41,7 +41,7 @@ pub struct HostArgs {
     pub hostname: String,
 
     #[clap(flatten)]
-    pub auth: Auth,
+    pub client_info: ClientInfo,
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -52,18 +52,22 @@ pub struct ClearCacheArgs {
 }
 
 #[derive(Deserialize, Parser, Debug, Clone)]
-pub struct Auth {
-    /// Google Domains Dynamic DNS credentials Username
-    #[clap(short, long, value_name = "USERNAME")]
+pub struct ClientInfo {
+    /// Username for Dynamic DNS service
+    #[clap(short, long)]
     pub username: String,
 
-    /// Google Domains Dynamic DNS credentials Password
-    #[clap(short, long, value_name = "PASSWORD")]
+    /// Password or access key for Dynamic DNS service
+    #[clap(short, long)]
     pub password: String,
+
+    /// URL for the dynamic DNS update API
+    #[clap(short, long)]
+    pub dyndns_url: String,
 }
 
 #[derive(Deserialize)]
 pub struct Config {
     pub cache_dir: Option<std::path::PathBuf>,
-    pub hosts: HashMap<String, Auth>,
+    pub hosts: HashMap<String, ClientInfo>,
 }

@@ -2,40 +2,34 @@ use std::net::IpAddr;
 
 use anyhow::Result;
 
-static URL: &str = "https://domains.google.com/nic/update";
-
 #[derive(Debug, Clone)]
 pub struct Client {
     username: String,
     password: String,
+    update_url: String,
 }
 
 impl Client {
-    pub fn new(username: &str, password: &str) -> Self {
+    pub fn new(username: &str, password: &str, update_url: &str) -> Self {
         Self {
             username: username.to_string(),
             password: password.to_string(),
+            update_url: update_url.to_string(),
         }
     }
 
     /// Updates the DNS for a host.
-    ///
-    /// Returns Ok(true) if update is succesful, and Ok(false) if the DNS was already correct.
-    pub fn update(&self, hostname: &str, ip: IpAddr) -> Result<bool> {
+    pub fn update(&self, hostname: &str, ip: IpAddr) -> Result<Response> {
         let client = reqwest::blocking::Client::builder()
             .user_agent(super::USER_AGENT)
             .build()?;
         let response = client
-            .get(URL)
+            .get(&self.update_url)
             .basic_auth(&self.username, Some(&self.password))
             .query(&[("hostname", hostname), ("myip", &ip.to_string())])
             .send()?;
         let ddns_response: Response = response.error_for_status()?.text()?.parse()?;
-        match ddns_response {
-            Response::Good(_) => Ok(true),
-            Response::NoChg(_) => Ok(false),
-            _ => Err(Error::Error(ddns_response))?,
-        }
+        Ok(ddns_response)
     }
 }
 
@@ -57,12 +51,18 @@ impl std::str::FromStr for Response {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut words = s.split(' ');
+        let mut words = s.trim().split(' ');
         let kind = words.next().unwrap_or("");
         let ip = words.next().unwrap_or("");
         match kind {
-            "good" => Ok(Self::Good(ip.parse().map_err(|_| Error::InvalidResponse)?)),
-            "nochg" => Ok(Self::NoChg(ip.parse().map_err(|_| Error::InvalidResponse)?)),
+            "good" => Ok(Self::Good(
+                ip.parse()
+                    .map_err(|_| Error::InvalidResponse(s.to_string()))?,
+            )),
+            "nochg" => Ok(Self::NoChg(
+                ip.parse()
+                    .map_err(|_| Error::InvalidResponse(s.to_string()))?,
+            )),
             "nohost" => Ok(Self::NoHost),
             "badauth" => Ok(Self::BadAuth),
             "notfqdn" => Ok(Self::NotFqdn),
@@ -71,7 +71,7 @@ impl std::str::FromStr for Response {
             "911" => Ok(Self::Error),
             "conflict A" => Ok(Self::ConflictA),
             "conflict AAAA" => Ok(Self::ConflictAAAA),
-            _ => Err(Error::InvalidResponse),
+            _ => Err(Error::InvalidResponse(s.to_string())),
         }
     }
 }
@@ -93,17 +93,15 @@ impl std::fmt::Display for Response {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum Error {
-    InvalidResponse,
-    Error(Response),
+    InvalidResponse(String),
 }
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::InvalidResponse => write!(f, "Invalid response from DDNS server"),
-            Self::Error(response) => write!(f, "{}", response),
+            Self::InvalidResponse(s) => write!(f, "Invalid response from DDNS server:\n\n{}", s),
         }
     }
 }
