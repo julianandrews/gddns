@@ -9,7 +9,7 @@ pub fn load(config_file: &std::path::Path) -> anyhow::Result<Config> {
 }
 
 #[derive(Parser, Debug, Clone)]
-#[clap(author, version, about, long_about = None)]
+#[clap(author, version, about, long_about = None, setting=AppSettings::DeriveDisplayOrder)]
 #[clap(global_setting(AppSettings::ArgsNegateSubcommands))]
 pub struct Args {
     /// Path to IP cache directory
@@ -39,20 +39,22 @@ pub enum Command {
 }
 
 #[derive(Parser, Debug, Clone)]
+#[clap(setting = AppSettings::DeriveDisplayOrder)]
 pub struct HostArgs {
     /// Hostname to update
     #[clap()]
     pub hostname: String,
 
+    #[clap(flatten)]
+    pub client_config: ClientConfig,
+
     /// IP address override
     #[clap(long)]
     pub ip: Option<std::net::IpAddr>,
-
-    #[clap(flatten)]
-    pub client_config: ClientConfig,
 }
 
 #[derive(Parser, Debug, Clone)]
+#[clap(setting = AppSettings::DeriveDisplayOrder)]
 pub struct ClearCacheArgs {
     /// Hostname to remove from the cache
     #[clap()]
@@ -61,6 +63,10 @@ pub struct ClearCacheArgs {
 
 #[derive(Deserialize, Parser, Debug, Clone)]
 pub struct ClientConfig {
+    /// URL for the dynamic DNS update API
+    #[clap(short, long)]
+    pub dyndns_url: String,
+
     /// Username for Dynamic DNS service
     #[clap(short, long)]
     pub username: String,
@@ -69,11 +75,7 @@ pub struct ClientConfig {
     #[clap(short, long)]
     pub password: String,
 
-    /// URL for the dynamic DNS update API
-    #[clap(short, long)]
-    pub dyndns_url: String,
-
-    /// Backoff time in minutes before retrying after a server error
+    /// Server error retry backoff time in minutes
     #[clap(long, default_value = "5")]
     #[serde(default = "default_server_backoff")]
     pub server_backoff: u64,
