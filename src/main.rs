@@ -18,9 +18,12 @@ static DEFAULT_CACHE_DIR: &str = concat!("/var/cache/", env!("CARGO_PKG_NAME"));
 fn main() -> Result<()> {
     let args = config::Args::parse();
     match args.command {
-        None => update_from_config(args.config_file, args.cache_dir),
+        None => update_from_config(args.config_file, args.cache_dir, args.ip),
         Some(Command::UpdateHost(comm_args)) => {
-            let ip = get_public_ip().context("Failed to get public IP")?;
+            let ip = match comm_args.ip {
+                Some(ip) => ip,
+                None => get_public_ip().context("Failed to get public IP")?,
+            };
             update_host(
                 &comm_args.hostname,
                 &comm_args.client_config,
@@ -32,12 +35,19 @@ fn main() -> Result<()> {
     }
 }
 
-fn update_from_config(config_file: PathBuf, cache_dir: Option<PathBuf>) -> Result<()> {
+fn update_from_config(
+    config_file: PathBuf,
+    cache_dir: Option<PathBuf>,
+    ip: Option<IpAddr>,
+) -> Result<()> {
     let config = config::load(&config_file).context("Failed to load config")?;
     let cache_dir = cache_dir
         .or(config.cache_dir)
         .unwrap_or(PathBuf::from(DEFAULT_CACHE_DIR));
-    let ip = get_public_ip().context("Failed to get public IP")?;
+    let ip = match ip {
+        Some(ip) => ip,
+        None => get_public_ip().context("Failed to get public IP")?,
+    };
     let mut update_failed = false;
     for (hostname, client_config) in &config.hosts {
         if let Err(error) = update_host(hostname, client_config, ip, Some(&cache_dir)) {

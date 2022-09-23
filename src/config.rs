@@ -20,6 +20,10 @@ pub struct Args {
     #[clap(long, default_value = "/etc/gddns/config.toml")]
     pub config_file: std::path::PathBuf,
 
+    /// IP address override
+    #[clap(long)]
+    pub ip: Option<std::net::IpAddr>,
+
     #[clap(subcommand)]
     pub command: Option<Command>,
 }
@@ -39,6 +43,10 @@ pub struct HostArgs {
     /// Hostname to update
     #[clap()]
     pub hostname: String,
+
+    /// IP address override
+    #[clap(long)]
+    pub ip: Option<std::net::IpAddr>,
 
     #[clap(flatten)]
     pub client_config: ClientConfig,
