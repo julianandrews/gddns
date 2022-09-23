@@ -1,6 +1,6 @@
 [package]
 name = "gddns"
-version = "2.1.0"
+version = "2.2.0"
 edition = "2021"
 authors = ["Julian Andrews <jandrews271@gmail.com>"]
 license = "BSD-3-Clause"
@@ -15,3 +15,21 @@ reqwest = "0.11"
 serde = { version = "1.0", features = ["derive"] }
 public-ip = "0.2.2"
 tokio = { version = "1.21.1", features = ["macros"] }
+
+[package.metadata.deb]
+extended-description = """\
+Dynamic DNS update client.
+
+Generic client for updating dynamic DNS. gddns is tested on Google \
+Domains and No-IP, but should work on any dynamic DNS service using the \
+standard dynamic DNS update API."""
+license-file = ["LICENSE", "0"]
+maintainer-scripts = "pkg/debian/"
+assets = [
+    ["target/release/gddns", "/usr/bin/", "755"],
+    ["README.md", "/usr/share/doc/", "644"],
+    ["pkg/config.toml", "/etc/gddns/", "640"],
+
+]
+conf-files = ["/etc/gddns/config.toml"]
+systemd-units = { unit-scripts = "pkg/systemd", enable = false, start = false }

@@ -1,0 +1,8 @@
+[Unit]
+Description=gddns dynamic DNS updater
+
+[Service]
+Type=oneshot
+User=gddns
+Group=gddns
+ExecStart=/usr/bin/gddns

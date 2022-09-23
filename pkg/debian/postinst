@@ -1,0 +1,26 @@
+#!/bin/sh
+set -e
+
+USER=gddns
+CACHE_DIR=/var/cache/gddns
+
+create_user() {
+    if id "${USER}" > /dev/null 2>&1; then return; fi
+    adduser --system "$USER" --group
+}
+
+create_cache_dir() {
+    mkdir -p "$CACHE_DIR"
+    chown $USER:$USER $CACHE_DIR
+    chmod 775 $CACHE_DIR
+}
+
+case "$1" in
+configure)
+    create_user
+    create_cache_dir
+    chown root:$USER /etc/gddns/config.toml
+    ;;
+esac
+
+#DEBHELPER#
