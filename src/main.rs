@@ -2,7 +2,6 @@ mod config;
 mod ddns;
 mod response_cache;
 
-use std::collections::HashMap;
 use std::net::IpAddr;
 use std::path::PathBuf;
 
@@ -12,17 +11,17 @@ use clap::Parser;
 use config::Command;
 use response_cache::ResponseCache;
 
-static USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"),);
 static DEFAULT_CACHE_DIR: &str = concat!("/var/cache/", env!("CARGO_PKG_NAME"));
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let args = config::Args::parse();
     match args.command {
-        None => update_from_config(args.config_file, args.cache_dir, args.ip),
+        None => update_from_config(args.config_file, args.cache_dir, args.ip).await,
         Some(Command::UpdateHost(comm_args)) => {
             let ip = match comm_args.ip {
                 Some(ip) => ip,
-                None => get_public_ip().context("Failed to get public IP")?,
+                None => public_ip::addr().await.context("Failed to get public IP")?,
             };
             update_host(
                 &comm_args.hostname,
@@ -30,12 +29,13 @@ fn main() -> Result<()> {
                 ip,
                 args.cache_dir,
             )
+            .await
         }
         Some(Command::ClearCache(comm_args)) => clear_cache(&comm_args.hostname, args.cache_dir),
     }
 }
 
-fn update_from_config(
+async fn update_from_config(
     config_file: PathBuf,
     cache_dir: Option<PathBuf>,
     ip: Option<IpAddr>,
@@ -46,11 +46,11 @@ fn update_from_config(
         .unwrap_or(PathBuf::from(DEFAULT_CACHE_DIR));
     let ip = match ip {
         Some(ip) => ip,
-        None => get_public_ip().context("Failed to get public IP")?,
+        None => public_ip::addr().await.context("Failed to get public IP")?,
     };
     let mut update_failed = false;
     for (hostname, client_config) in &config.hosts {
-        if let Err(error) = update_host(hostname, client_config, ip, Some(&cache_dir)) {
+        if let Err(error) = update_host(hostname, client_config, ip, Some(&cache_dir)).await {
             update_failed = true;
             eprintln!("Failed to update {}:\n  {}", hostname, error);
         }
@@ -61,7 +61,7 @@ fn update_from_config(
     Ok(())
 }
 
-fn update_host<P: Into<PathBuf>>(
+async fn update_host<P: Into<PathBuf>>(
     hostname: &str,
     client_config: &config::ClientConfig,
     ip: IpAddr,
@@ -119,6 +119,7 @@ fn update_host<P: Into<PathBuf>>(
     );
     let response = client
         .update(hostname, ip)
+        .await
         .with_context(|| format!("Failed to update DNS for {}", hostname))?;
     cache
         .put(hostname, &response)
@@ -140,21 +141,4 @@ fn clear_cache(hostname: &str, cache_dir: Option<PathBuf>) -> Result<()> {
         .clear(hostname)
         .with_context(|| format!("Failed to clear cache for {}", hostname))?;
     Ok(())
-}
-
-// TODO: Come up with a more robust/polite approach than hitting httpbin.org
-// STUN?
-fn get_public_ip() -> Result<IpAddr> {
-    let client = reqwest::blocking::Client::builder()
-        .user_agent(USER_AGENT)
-        .build()?;
-    let mut response = client.get("https://httpbin.org/ip").send()?;
-    response = response.error_for_status()?;
-    let data: HashMap<String, String> = response.json::<HashMap<String, String>>()?;
-    let ip = data
-        .get("origin")
-        .ok_or(anyhow::anyhow!("Invalid data in response"))?
-        .parse()?;
-
-    Ok(ip)
 }

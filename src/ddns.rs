@@ -2,6 +2,8 @@ use std::net::IpAddr;
 
 use anyhow::Result;
 
+static USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"),);
+
 #[derive(Debug, Clone)]
 pub struct Client {
     username: String,
@@ -19,16 +21,15 @@ impl Client {
     }
 
     /// Updates the DNS for a host.
-    pub fn update(&self, hostname: &str, ip: IpAddr) -> Result<Response> {
-        let client = reqwest::blocking::Client::builder()
-            .user_agent(super::USER_AGENT)
-            .build()?;
+    pub async fn update(&self, hostname: &str, ip: IpAddr) -> Result<Response> {
+        let client = reqwest::Client::builder().user_agent(USER_AGENT).build()?;
         let response = client
             .get(&self.update_url)
             .basic_auth(&self.username, Some(&self.password))
             .query(&[("hostname", hostname), ("myip", &ip.to_string())])
-            .send()?;
-        let ddns_response: Response = response.error_for_status()?.text()?.trim().parse()?;
+            .send()
+            .await?;
+        let ddns_response: Response = response.error_for_status()?.text().await?.trim().parse()?;
         Ok(ddns_response)
     }
 }
