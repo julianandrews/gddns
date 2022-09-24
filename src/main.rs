@@ -43,7 +43,7 @@ async fn update_from_config(
     let config = config::load(&config_file).context("Failed to load config")?;
     let cache_dir = cache_dir
         .or(config.cache_dir)
-        .unwrap_or(PathBuf::from(DEFAULT_CACHE_DIR));
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_CACHE_DIR));
     let ip = match ip {
         Some(ip) => ip,
         None => public_ip::addr().await.context("Failed to get public IP")?,
@@ -135,7 +135,7 @@ async fn update_host<P: Into<PathBuf>>(
 }
 
 fn clear_cache(hostname: &str, cache_dir: Option<PathBuf>) -> Result<()> {
-    let cache_dir = cache_dir.unwrap_or(PathBuf::from(DEFAULT_CACHE_DIR));
+    let cache_dir = cache_dir.unwrap_or_else(|| PathBuf::from(DEFAULT_CACHE_DIR));
     let cache = ResponseCache::new(cache_dir);
     cache
         .clear(hostname)
