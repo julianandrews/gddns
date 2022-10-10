@@ -31,11 +31,26 @@ pub struct Args {
 #[derive(clap::Subcommand, Debug, Clone)]
 #[clap(setting = AppSettings::ColoredHelp)]
 pub enum Command {
+    /// Launch as a long running daemon
+    Daemon(DaemonArgs),
+
     /// Update a specific host providing arguments from the command line
     UpdateHost(HostArgs),
 
     /// Clear the IP cache for a host
     ClearCache(ClearCacheArgs),
+}
+
+#[derive(Parser, Debug, Clone)]
+#[clap(setting = AppSettings::DeriveDisplayOrder)]
+pub struct DaemonArgs {
+    /// Path to config file
+    #[clap(long, default_value = "/etc/gddns/config.toml")]
+    pub config_file: std::path::PathBuf,
+
+    /// Polling interval in seconds
+    #[clap(short, long)]
+    pub poll_interval: Option<u64>,
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -62,6 +77,7 @@ pub struct ClearCacheArgs {
 }
 
 #[derive(Deserialize, Parser, Debug, Clone)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ClientConfig {
     /// URL for the dynamic DNS update API
     #[clap(short, long)]
@@ -85,8 +101,10 @@ fn default_server_backoff() -> u64 {
     5
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Config {
     pub cache_dir: Option<std::path::PathBuf>,
+    pub daemon_poll_interval: Option<u64>,
     pub hosts: HashMap<String, ClientConfig>,
 }

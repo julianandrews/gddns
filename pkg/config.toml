@@ -1,4 +1,5 @@
 cache-dir = "/var/cache/gddns"
+daemon-poll-interval = 300
 
 [hosts]
 
@@ -7,11 +8,11 @@ cache-dir = "/var/cache/gddns"
 #   [hosts."google-subdomain.example.com"]
 #   username = "HExV0aKG0TvckGKh"
 #   password = "F4WmsCLfTGXnR1j5"
-#   dyndns_url = "https://domains.google.com/nic/update"
+#   dyndns-url = "https://domains.google.com/nic/update"
 #
 # NoIP example
 #   [hosts."noip-subdomain.example.com"]
 #   username = "NoIPUsername"
 #   password = "NoIPP@ssword2048"
-#   dyndns_url = "https://dynupdate.no-ip.com/nic/update"
-#   server_backoff = 30
+#   dyndns-url = "https://dynupdate.no-ip.com/nic/update"
+#   server-backoff = 30

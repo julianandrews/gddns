@@ -2,18 +2,12 @@
 
 Dynamic DNS client.
 
-gddns is designed to be a clean and simple dynamic DNS client which should
-work for most people in most situations.
-
-It is designed for periodic execution, and is intended to be used either for
-ad-hoc updates or with systemd timers or crontab entries to keep a system up to
-date. gddns maintains a cache of recent responses and will only hit the DDNS
-server if your public IP address has changed.
+gddns is designed to be a clean and simple dynamic DNS client.
 
 ## Supported services
 
 gddns has been tested on Google domains and No-IP, but should work with any
-dynamic DNS service using the standard dynamic DNS API.
+of several other dynamic DNS service using the same DynDNS API.
 
 ## Installation
 
@@ -34,24 +28,22 @@ Install the `.deb` package from the releases page, edit
 `/etc/gddns/config.toml` with configuration for your particular domain(s), and
 then run:
 
-    sudo systemctl enable --now gddns.timer
-
-gddns will run every 5 minutes. If you wish to run gddns at a different
-frequency, you can create your own systemd timer using `gddns.timer` as a
-model or write a simple cronjob.
+    sudo systemctl enable --now gddns.service
 
 ### Other Linux or MacOS
 
 You will need to:
 
 - create a config file,
-- create a cache diretory with write access, and
-- periodically run gddns (potentially with a systemd timer or cronjob).
+- create a cache directory with write access, and
+- either
+    - run gddns in daemon mode, or
+    - periodically run gddns (potentially with a systemd timer or cronjob).
 
 #### Config file
 
-By default gddns looks for a config file at `/etc/gddns/config.toml`. See
-`pkg/config.toml` for a concrete example.
+By default gddns looks for a config file at `/etc/gddns/config.toml` and will
+update all configured hosts. See `pkg/config.toml` for a concrete example.
 
 #### Cache directory
 
@@ -70,15 +62,19 @@ If properly configured, you can simply run
 
 and gddns will update all configured dynamic DNS hosts.
 
+    gddns daemon
+
+will launch gddns and regularly poll your IP address looking for changes.
+
 See `gddns --help` for detailed options.
 
 ### Direct invocation
 
-You can also invoke gddns directly:
+You can also invoke gddns directly for a single host:
 
     gddns update-host <your_hostname> --cache-dir /tmp/gddns \
         --username <your_username> --password <your_password> \
-        --dyndns_url "https://domains.google.com/nic/update"
+        --dyndns-url "https://domains.google.com/nic/update"
 
 ## Contributing
 
