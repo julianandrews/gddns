@@ -1,6 +1,6 @@
 [package]
 name = "gddns"
-version = "2.3.1"
+version = "2.4.0"
 edition = "2021"
 authors = ["Julian Andrews <jandrews271@gmail.com>"]
 readme = "README.md"
@@ -16,6 +16,7 @@ reqwest = "0.11"
 serde = { version = "1.0", features = ["derive"] }
 public-ip = "0.2.2"
 tokio = { version = "1.21.1", features = ["macros"] }
+notify = "5.0.0"
 
 [package.metadata.deb]
 extended-description = """\

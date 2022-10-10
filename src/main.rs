@@ -34,7 +34,7 @@ async fn main() -> Result<()> {
             let mut response_cache = match args.cache_dir {
                 Some(dir) => ResponseCache::new(dir),
                 None => ResponseCache::new(DEFAULT_CACHE_DIR),
-            };
+            }?;
             update_host(
                 &comm_args.hostname,
                 &comm_args.client_config,
@@ -57,11 +57,12 @@ async fn run_daemon(
         cache_dir
             .or_else(|| config.cache_dir.clone())
             .unwrap_or_else(|| PathBuf::from(DEFAULT_CACHE_DIR)),
-    );
+    )?;
     let poll_interval = std::time::Duration::from_secs(
         poll_interval.or(config.daemon_poll_interval).unwrap_or(300),
     );
     loop {
+        response_cache.check_disk_changes()?;
         match public_ip::addr().await {
             Some(ip) => {
                 if let Err(error) = update_all(&config, &mut response_cache, ip).await {
@@ -84,7 +85,7 @@ async fn update_from_config(
         cache_dir
             .or_else(|| config.cache_dir.clone())
             .unwrap_or_else(|| PathBuf::from(DEFAULT_CACHE_DIR)),
-    );
+    )?;
     let ip = match ip {
         Some(ip) => ip,
         None => public_ip::addr().await.context("Failed to get public IP")?,
@@ -181,7 +182,7 @@ async fn update_host<'cache, 'hostname: 'cache>(
 
 fn clear_cache(hostname: &str, cache_dir: Option<PathBuf>) -> Result<()> {
     let cache_dir = cache_dir.unwrap_or_else(|| PathBuf::from(DEFAULT_CACHE_DIR));
-    let mut cache = ResponseCache::new(cache_dir);
+    let mut cache = ResponseCache::new(cache_dir)?;
     cache
         .clear(hostname)
         .with_context(|| format!("Failed to clear cache for {}", hostname))?;

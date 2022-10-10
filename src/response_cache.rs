@@ -1,25 +1,38 @@
-use anyhow::Result;
 use std::collections::{btree_map, BTreeMap};
 use std::time::SystemTime;
+
+use anyhow::Result;
+use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 
 use super::ddns::Response;
 
 /// Filesystem backed cache of past runs used to prevent repeated requests to the DDNS server.
 ///
-/// The cache consists of a base directory containing one file per hostname. The file must be named
-/// after the hostname and contains the text of the DDNS response.
-#[derive(Debug, Clone)]
+/// The disk representation of the cache consists of a base directory containing one file per
+/// hostname. The `ResponseCache` monitors the filesystem for changes, and a call to
+/// `check_disk_changes` will invalidate the in-memory cache if any changes have occured in the
+/// cache directory since the last check.
+#[derive(Debug)]
 pub struct ResponseCache<'a> {
     dir: std::path::PathBuf,
     cache: BTreeMap<&'a str, (Response, SystemTime)>,
+    notify_receiver: std::sync::mpsc::Receiver<notify::Result<Event>>,
+    _notify_watcher: RecommendedWatcher,
 }
 
 impl<'a> ResponseCache<'a> {
-    pub fn new<P: Into<std::path::PathBuf>>(dir: P) -> Self {
-        Self {
-            dir: dir.into(),
+    pub fn new<P: Into<std::path::PathBuf>>(dir: P) -> Result<Self> {
+        let dir = dir.into();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut watcher = RecommendedWatcher::new(tx, Config::default())?;
+        watcher.watch(&dir, RecursiveMode::NonRecursive)?;
+
+        Ok(Self {
+            dir,
             cache: BTreeMap::new(),
-        }
+            notify_receiver: rx,
+            _notify_watcher: watcher,
+        })
     }
 
     /// Gets the response for the last succesful run for a host.
@@ -69,7 +82,7 @@ impl<'a> ResponseCache<'a> {
         Ok(())
     }
 
-    /// Cleares the IP address cache for a host.
+    /// Clears the IP address cache for a host.
     ///
     /// # Errors
     ///
@@ -77,6 +90,27 @@ impl<'a> ResponseCache<'a> {
     pub fn clear(&mut self, hostname: &str) -> Result<()> {
         self.cache.remove(hostname);
         std::fs::remove_file(self.dir.join(hostname))?;
+        Ok(())
+    }
+
+    /// Checks if any changes have happened on disk, and invalidates the cache if so.
+    ///
+    /// This method invalidates the cache if there's been any write whatsoever. This is obviously
+    /// overkill, and also, will always invalidate the whole cache after a `put`, but invalidating
+    /// the cache should never lead to an incorrect result, and performance-wise, it's better to do
+    /// a bunch of extra work after a (relatively uncommon) change rather than do any work at all
+    /// in the common case of no changes.
+    pub fn check_disk_changes(&mut self) -> Result<()> {
+        let mut changed = false;
+        for result in self.notify_receiver.try_iter() {
+            if !result?.kind.is_access() {
+                changed = true;
+            }
+        }
+        if changed {
+            println!("Invalidating in-memory cache");
+            self.cache.clear();
+        }
         Ok(())
     }
 }
