@@ -34,7 +34,7 @@ impl Client {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Response {
     Good(IpAddr),
     NoChg(IpAddr),

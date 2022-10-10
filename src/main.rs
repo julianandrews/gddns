@@ -31,14 +31,14 @@ async fn main() -> Result<()> {
                 Some(ip) => ip,
                 None => public_ip::addr().await.context("Failed to get public IP")?,
             };
-            let response_cache = match args.cache_dir {
+            let mut response_cache = match args.cache_dir {
                 Some(dir) => ResponseCache::new(dir),
                 None => ResponseCache::new(DEFAULT_CACHE_DIR),
             };
             update_host(
                 &comm_args.hostname,
                 &comm_args.client_config,
-                &response_cache,
+                &mut response_cache,
                 ip,
             )
             .await
@@ -52,9 +52,8 @@ async fn run_daemon(
     cache_dir: Option<PathBuf>,
     poll_interval: Option<u64>,
 ) -> Result<()> {
-    println!("Starting as deamon");
     let config = config::load(&config_file).context("Failed to load config")?;
-    let response_cache = ResponseCache::new(
+    let mut response_cache = ResponseCache::new(
         cache_dir
             .or_else(|| config.cache_dir.clone())
             .unwrap_or_else(|| PathBuf::from(DEFAULT_CACHE_DIR)),
@@ -62,18 +61,14 @@ async fn run_daemon(
     let poll_interval = std::time::Duration::from_secs(
         poll_interval.or(config.daemon_poll_interval).unwrap_or(300),
     );
-    let mut old_ip = None;
     loop {
-        let new_ip = public_ip::addr().await;
-        if new_ip.is_none() {
-            eprintln!("Failed to get public IP address");
-        } else if new_ip != old_ip {
-            old_ip = new_ip;
-            if let Some(ip) = new_ip {
-                if let Err(error) = update_all(&config, &response_cache, ip).await {
+        match public_ip::addr().await {
+            Some(ip) => {
+                if let Err(error) = update_all(&config, &mut response_cache, ip).await {
                     eprintln!("{}", error);
                 }
             }
+            None => eprintln!("Failed to get public IP address"),
         }
         std::thread::sleep(poll_interval);
     }
@@ -85,7 +80,7 @@ async fn update_from_config(
     ip: Option<IpAddr>,
 ) -> Result<()> {
     let config = config::load(&config_file).context("Failed to load config")?;
-    let response_cache = ResponseCache::new(
+    let mut response_cache = ResponseCache::new(
         cache_dir
             .or_else(|| config.cache_dir.clone())
             .unwrap_or_else(|| PathBuf::from(DEFAULT_CACHE_DIR)),
@@ -94,10 +89,14 @@ async fn update_from_config(
         Some(ip) => ip,
         None => public_ip::addr().await.context("Failed to get public IP")?,
     };
-    update_all(&config, &response_cache, ip).await
+    update_all(&config, &mut response_cache, ip).await
 }
 
-async fn update_all(config: &Config, response_cache: &ResponseCache, ip: IpAddr) -> Result<()> {
+async fn update_all<'cache, 'config: 'cache>(
+    config: &'config Config,
+    response_cache: &mut ResponseCache<'cache>,
+    ip: IpAddr,
+) -> Result<()> {
     let mut update_failed = false;
     for (hostname, client_config) in &config.hosts {
         if let Err(error) = update_host(hostname, client_config, response_cache, ip).await {
@@ -112,10 +111,10 @@ async fn update_all(config: &Config, response_cache: &ResponseCache, ip: IpAddr)
     }
 }
 
-async fn update_host(
-    hostname: &str,
+async fn update_host<'cache, 'hostname: 'cache>(
+    hostname: &'hostname str,
     client_config: &config::ClientConfig,
-    response_cache: &ResponseCache,
+    response_cache: &mut ResponseCache<'cache>,
     ip: IpAddr,
 ) -> Result<()> {
     let cache_entry = response_cache
@@ -133,7 +132,7 @@ async fn update_host(
             ))
         }
         Some((ddns::Response::ServerError(e), mtime)) => {
-            let age = std::time::SystemTime::now().duration_since(mtime)?;
+            let age = std::time::SystemTime::now().duration_since(*mtime)?;
             let backoff_time = std::time::Duration::from_secs(client_config.server_backoff * 60);
             if age < backoff_time {
                 let age_str = if age.as_secs() >= 120 {
@@ -153,8 +152,7 @@ async fn update_host(
         }
         None => None,
     };
-    if old_ip == Some(ip) {
-        println!("IP for {} already up to date ({})", hostname, ip);
+    if old_ip == Some(&ip) {
         return Ok(());
     }
 
@@ -183,7 +181,7 @@ async fn update_host(
 
 fn clear_cache(hostname: &str, cache_dir: Option<PathBuf>) -> Result<()> {
     let cache_dir = cache_dir.unwrap_or_else(|| PathBuf::from(DEFAULT_CACHE_DIR));
-    let cache = ResponseCache::new(cache_dir);
+    let mut cache = ResponseCache::new(cache_dir);
     cache
         .clear(hostname)
         .with_context(|| format!("Failed to clear cache for {}", hostname))?;
