@@ -82,7 +82,7 @@ impl<'a> ResponseCache<'a> {
         Ok(())
     }
 
-    /// Clears the IP address cache for a host.
+    /// Clears the on disk IP address cache for a host.
     ///
     /// # Errors
     ///
@@ -95,11 +95,11 @@ impl<'a> ResponseCache<'a> {
 
     /// Checks if any changes have happened on disk, and invalidates the cache if so.
     ///
-    /// This method invalidates the cache if there's been any write whatsoever. This is obviously
-    /// overkill, and also, will always invalidate the whole cache after a `put`, but invalidating
-    /// the cache should never lead to an incorrect result, and performance-wise, it's better to do
-    /// a bunch of extra work after a (relatively uncommon) change rather than do any work at all
-    /// in the common case of no changes.
+    /// This method invalidates the in-memory cache if there's been any write whatsoever. This is
+    /// obviously overkill, and will always invalidate the whole cache after a `put()`. That said,
+    /// invalidating the cache should never lead to an incorrect result, and it's better to do a
+    /// few extra reads after a (relatively uncommon) change to avoid doing any reads in the
+    /// common case of no changes.
     pub fn check_disk_changes(&mut self) -> Result<()> {
         let mut changed = false;
         for result in self.notify_receiver.try_iter() {
@@ -109,6 +109,8 @@ impl<'a> ResponseCache<'a> {
         }
         if changed {
             println!("Invalidating in-memory cache");
+            // Note that this isn't the `ResponseCache.clear()` method - we're just clearing a map.
+            // The cache will be refreshed from disk on the next call `get()`.
             self.cache.clear();
         }
         Ok(())

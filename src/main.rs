@@ -153,11 +153,13 @@ async fn update_host<'cache, 'hostname: 'cache>(
         }
         None => None,
     };
-    if old_ip == Some(&ip) {
-        return Ok(());
+
+    match old_ip {
+        Some(old_ip) if old_ip == &ip => return Ok(()),
+        Some(old_ip) => println!("Updating IP for {} from {} to {}", hostname, old_ip, ip),
+        None => println!("No cached value. Setting IP for {} to {}", hostname, ip),
     }
 
-    println!("Updating IP for {} to {}", hostname, ip);
     let client = ddns::Client::new(
         &client_config.username,
         &client_config.password,
