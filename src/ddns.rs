@@ -1,97 +1,122 @@
 use std::net::IpAddr;
 
-use anyhow::Result;
+use anyhow::anyhow;
+
+use crate::config::ClientConfig;
 
 static USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"),);
 
 #[derive(Debug, Clone)]
 pub struct Client {
-    username: String,
-    password: String,
+    auth: Auth,
     update_url: String,
 }
 
-impl Client {
-    pub fn new(username: &str, password: &str, update_url: &str) -> Self {
-        Self {
-            username: username.to_string(),
-            password: password.to_string(),
-            update_url: update_url.to_string(),
-        }
-    }
+#[derive(Debug, Clone)]
+enum Auth {
+    Password(PasswordAuth),
+    Token(String),
+}
 
+#[derive(Debug, Clone)]
+struct PasswordAuth {
+    username: String,
+    password: String,
+}
+
+impl Client {
     /// Updates the DNS for a host.
-    pub async fn update(&self, hostname: &str, ip: IpAddr) -> Result<Response> {
-        let client = reqwest::Client::builder().user_agent(USER_AGENT).build()?;
-        let response = client
+    pub async fn update(&self, hostname: &str, ip: IpAddr) -> DdnsResult {
+        let client = match reqwest::Client::builder().user_agent(USER_AGENT).build() {
+            Ok(client) => client,
+            Err(e) => return DdnsResult::FatalError("requesterror".to_string(), e.to_string()),
+        };
+        let mut request = client
             .get(&self.update_url)
-            .basic_auth(&self.username, Some(&self.password))
-            .query(&[("hostname", hostname), ("myip", &ip.to_string())])
-            .send()
-            .await?;
-        let ddns_response: Response = response.error_for_status()?.text().await?.trim().parse()?;
-        Ok(ddns_response)
+            .query(&[("hostname", hostname), ("myip", &ip.to_string())]);
+        request = match &self.auth {
+            Auth::Password(auth) => request.basic_auth(&auth.username, Some(&auth.password)),
+            Auth::Token(token) => request.header("Authorization", format!("Token {}", token)),
+        };
+
+        let response = match request.send().await {
+            Ok(response) => response,
+            Err(e) => return DdnsResult::FatalError("requesterror".to_string(), e.to_string()),
+        };
+        let status = response.status();
+        if !status.is_success() {
+            let text = response.text().await.unwrap_or_else(|_| "".to_string());
+            if status.is_server_error() || status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                return DdnsResult::RetryableError("retryable".to_string(), text);
+            } else {
+                return DdnsResult::FatalError("clienterror".to_string(), text);
+            }
+        }
+        let text = match response.text().await {
+            Ok(text) => text,
+            Err(e) => return DdnsResult::FatalError("requesterror".to_string(), e.to_string()),
+        };
+        // deSEC doesn't return the IP address with "good" and "nochg" responses. Add it in.
+        let text = match text.as_str() {
+            "good" | "nochg" => format!("{} {}", text, ip),
+            _ => text,
+        };
+        text.parse::<DdnsResult>()
+            .unwrap_or_else(|e| DdnsResult::FatalError("parseerror".to_string(), e.to_string()))
+    }
+}
+
+impl std::convert::From<&ClientConfig> for Client {
+    fn from(config: &ClientConfig) -> Self {
+        let auth = match &config.username {
+            Some(username) => Auth::Password(PasswordAuth {
+                username: username.to_string(),
+                password: config.password.clone().unwrap(),
+            }),
+            None => Auth::Token(config.token.clone().unwrap()),
+        };
+        Client {
+            auth,
+            update_url: config.dyndns_url.to_string(),
+        }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Response {
+pub enum DdnsResult {
     Good(IpAddr),
     NoChg(IpAddr),
-    UserError(String),
-    ServerError(String),
+    FatalError(String, String),
+    RetryableError(String, String),
 }
 
-impl std::str::FromStr for Response {
-    type Err = Error;
+impl std::str::FromStr for DdnsResult {
+    type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let code = s.split(' ').next().unwrap_or("");
-        let last_word = s.rsplit(' ').next().unwrap_or("");
+        let (code, rest) = s
+            .split_once(' ')
+            .ok_or_else(|| anyhow!("Invalid response from DDNS server: {}", s))?;
         match code {
-            "good" => {
-                let ip = last_word
-                    .parse()
-                    .map_err(|_| Error::InvalidResponse(s.to_string()))?;
-                Ok(Self::Good(ip))
+            "good" => Ok(Self::Good(rest.parse()?)),
+            "nochg" => Ok(Self::NoChg(rest.parse()?)),
+            "nohost" | "badauth" | "notfqdn" | "badagent" | "!donator" | "conflict" | "abuse"
+            | "clienterror" => Ok(Self::FatalError(code.to_string(), rest.to_string())),
+            "dnserr" | "911" | "retryable" => {
+                Ok(Self::RetryableError(code.to_string(), rest.to_string()))
             }
-            "nochg" => {
-                let ip = last_word
-                    .parse()
-                    .map_err(|_| Error::InvalidResponse(s.to_string()))?;
-                Ok(Self::NoChg(ip))
-            }
-            "nohost" | "badauth" | "notfqdn" | "badagent" | "!donator" | "conflict" | "abuse" => {
-                Ok(Self::UserError(s.to_string()))
-            }
-            "dnserr" | "911" => Ok(Self::ServerError(s.to_string())),
-            _ => Err(Error::InvalidResponse(s.to_string())),
+            _ => Err(anyhow!("Invalid response from DDNS server: {}.", s)),
         }
     }
 }
 
-impl std::fmt::Display for Response {
+impl std::fmt::Display for DdnsResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Good(ip) => write!(f, "good {}", ip),
             Self::NoChg(ip) => write!(f, "nochg {}", ip),
-            Self::UserError(s) => write!(f, "{}", s),
-            Self::ServerError(s) => write!(f, "{}", s),
+            Self::FatalError(code, s) => write!(f, "{} {}", code, s),
+            Self::RetryableError(code, s) => write!(f, "{} {}", code, s),
         }
     }
 }
-
-#[derive(Debug, Clone)]
-pub enum Error {
-    InvalidResponse(String),
-}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidResponse(s) => write!(f, "Invalid response from DDNS server:\n\n{}", s),
-        }
-    }
-}
-
-impl std::error::Error for Error {}

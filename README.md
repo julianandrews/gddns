@@ -2,12 +2,12 @@
 
 Dynamic DNS client.
 
-gddns is designed to be a clean and simple dynamic DNS client.
+gddns is designed to be a simple and robust client for the DynDNS API.
 
 ## Supported services
 
-gddns has been tested on Google domains and No-IP, but should work with any
-of several other dynamic DNS service using the same DynDNS API.
+gddns has been tested on deSEC, and No-IP, but should work with any of several
+other dynamic DNS service using the DynDNS API.
 
 ## Installation
 
@@ -51,8 +51,8 @@ The user running gddns must have write permissions to the cache directory. By
 default this is `/var/cache/gddns`. This can be overridden in `config.toml`, or
 by command line option.
 
-Files in the cache directory can be deleted if the cache gets out of sync, in
-which case, gddns will send an update request the next time it is run.
+Files in the cache directory can be deleted if the cache gets out of sync. In
+that case, gddns will send an update request the next time it is run.
 
 ## Usage
 

@@ -1,10 +1,9 @@
 use std::collections::{btree_map, BTreeMap};
 use std::time::SystemTime;
 
-use anyhow::Result;
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 
-use super::ddns::Response;
+use super::ddns::DdnsResult;
 
 /// Filesystem backed cache of past runs used to prevent repeated requests to the DDNS server.
 ///
@@ -15,13 +14,13 @@ use super::ddns::Response;
 #[derive(Debug)]
 pub struct ResponseCache<'a> {
     dir: std::path::PathBuf,
-    cache: BTreeMap<&'a str, (Response, SystemTime)>,
+    cache: BTreeMap<&'a str, (DdnsResult, SystemTime)>,
     notify_receiver: std::sync::mpsc::Receiver<notify::Result<Event>>,
     _notify_watcher: RecommendedWatcher,
 }
 
 impl<'a> ResponseCache<'a> {
-    pub fn new<P: Into<std::path::PathBuf>>(dir: P) -> Result<Self> {
+    pub fn new<P: Into<std::path::PathBuf>>(dir: P) -> Result<Self, ResponseCacheError> {
         let dir = dir.into();
         let (tx, rx) = std::sync::mpsc::channel();
         let mut watcher = RecommendedWatcher::new(tx, Config::default())?;
@@ -43,7 +42,10 @@ impl<'a> ResponseCache<'a> {
     ///
     /// This function will return an error if it fails to read the cache file or if the cache file
     /// exists but does not contain a valid response.
-    pub fn get<'b: 'a>(&mut self, hostname: &'b str) -> Result<Option<&(Response, SystemTime)>> {
+    pub fn get<'b: 'a>(
+        &mut self,
+        hostname: &'b str,
+    ) -> std::result::Result<Option<&(DdnsResult, SystemTime)>, ResponseCacheError> {
         match self.cache.entry(hostname) {
             btree_map::Entry::Occupied(entry) => Ok(Some(entry.into_mut())),
             btree_map::Entry::Vacant(entry) => {
@@ -53,7 +55,10 @@ impl<'a> ResponseCache<'a> {
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
                     Err(e) => Err(e)?,
                 };
-                let response = String::from_utf8_lossy(&data).parse()?;
+                let text = String::from_utf8_lossy(&data);
+                let response: DdnsResult = text
+                    .parse()
+                    .map_err(|_| ResponseCacheError::Parse(text.to_string()))?;
                 let mtime = std::fs::metadata(&cache_file)?.modified()?;
                 Ok(Some(entry.insert((response, mtime))))
             }
@@ -69,7 +74,11 @@ impl<'a> ResponseCache<'a> {
     ///
     /// This function will return an error if it fails to create the cache directory or write the
     /// cache file.
-    pub fn put<'b: 'a>(&mut self, hostname: &'b str, response: &Response) -> Result<()> {
+    pub fn put<'b: 'a>(
+        &mut self,
+        hostname: &'b str,
+        response: &DdnsResult,
+    ) -> Result<(), ResponseCacheError> {
         if let Some((cached_response, _mtime)) = self.cache.get(hostname) {
             if cached_response == response {
                 return Ok(());
@@ -87,20 +96,18 @@ impl<'a> ResponseCache<'a> {
     /// # Errors
     ///
     /// This function will return an error if it fails to remove the cache file.
-    pub fn clear(&mut self, hostname: &str) -> Result<()> {
+    pub fn clear(&mut self, hostname: &str) -> Result<(), ResponseCacheError> {
         self.cache.remove(hostname);
         std::fs::remove_file(self.dir.join(hostname))?;
         Ok(())
     }
 
-    /// Checks if any changes have happened on disk, and invalidates the cache if so.
+    /// Checks if any changes have happened on disk, and invalidates the in-memory cache if so.
     ///
-    /// This method invalidates the in-memory cache if there's been any write whatsoever. This is
-    /// obviously overkill, and will always invalidate the whole cache after a `put()`. That said,
-    /// invalidating the cache should never lead to an incorrect result, and it's better to do a
-    /// few extra reads after a (relatively uncommon) change to avoid doing any reads in the
-    /// common case of no changes.
-    pub fn check_disk_changes(&mut self) -> Result<()> {
+    /// This will always invalidate the whole cache after a `put()`, and we'll read the cache
+    /// from disk on the next call to `get()`. Doing an unecessary filesystem read after
+    /// (relatively uncommont) change is fine, and this keeps the logic simple.
+    pub fn check_disk_changes(&mut self) -> Result<(), ResponseCacheError> {
         let mut changed = false;
         for result in self.notify_receiver.try_iter() {
             if !result?.kind.is_access() {
@@ -108,11 +115,40 @@ impl<'a> ResponseCache<'a> {
             }
         }
         if changed {
-            println!("Invalidating in-memory cache");
-            // Note that this isn't the `ResponseCache.clear()` method - we're just clearing a map.
-            // The cache will be refreshed from disk on the next call `get()`.
             self.cache.clear();
         }
         Ok(())
     }
 }
+
+/// Error type for ResponseCache operations
+#[derive(Debug)]
+pub enum ResponseCacheError {
+    Notify(notify::Error),
+    IO(std::io::Error),
+    Parse(String),
+}
+
+impl From<std::io::Error> for ResponseCacheError {
+    fn from(error: std::io::Error) -> Self {
+        ResponseCacheError::IO(error)
+    }
+}
+
+impl From<notify::Error> for ResponseCacheError {
+    fn from(error: notify::Error) -> Self {
+        ResponseCacheError::Notify(error)
+    }
+}
+
+impl std::fmt::Display for ResponseCacheError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ResponseCacheError::Notify(e) => write!(f, "{}", e),
+            ResponseCacheError::IO(e) => write!(f, "{}", e),
+            ResponseCacheError::Parse(s) => write!(f, "Failed to parse {}.", s),
+        }
+    }
+}
+
+impl std::error::Error for ResponseCacheError {}
